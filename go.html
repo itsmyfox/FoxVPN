@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FoxVPN</title>
+  <meta name="referrer" content="no-referrer">
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; background: #141414; color: #eee;
+      display: flex; min-height: 100vh; align-items: center; justify-content: center; }
+    .box { text-align: center; padding: 24px; max-width: 360px; }
+    a { color: #ff7a45; }
+    .muted { color: #888; font-size: 14px; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <p>Открываем FoxVPN…</p>
+    <p class="muted" id="hint">Если переход не начался, <a id="manual" href="#">нажмите здесь</a>.</p>
+  </div>
+  <script>
+(function () {
+  var LOG_API = 'https://foxygame.net/yookassa/campaign/log';
+  var params = new URLSearchParams(location.search);
+  var slug = (params.get('c') || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 64);
+  var type = params.get('t') || '';
+  var validTypes = { trial: 1, releases: 1, channel: 1 };
+
+  function targetUrl() {
+    if (type === 'trial') return 'https://t.me/rufoxvpn_bot?start=cmp_' + encodeURIComponent(slug) + '_trial';
+    if (type === 'releases') return 'https://github.com/itsmyfox/FoxVPN/releases';
+    if (type === 'channel') return 'https://t.me/rufoxvpn';
+    return 'https://t.me/rufoxvpn';
+  }
+
+  function go() {
+    var url = targetUrl();
+    var a = document.getElementById('manual');
+    if (a) a.href = url;
+    location.replace(url);
+  }
+
+  if (!slug || !validTypes[type]) {
+    document.querySelector('.box p').textContent = 'Неверная ссылка';
+    return;
+  }
+
+  var logUrl = LOG_API + '?c=' + encodeURIComponent(slug) + '&t=' + encodeURIComponent(type);
+  var img = new Image();
+  img.src = logUrl;
+  fetch(logUrl, { mode: 'no-cors', cache: 'no-store' }).catch(function () {});
+
+  setTimeout(go, 120);
+})();
+  </script>
+</body>
+</html>

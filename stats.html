@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FoxVPN — статистика кампаний</title>
+  <style>
+    :root { --bg: #141414; --card: #1e1e1e; --border: #2a2a2a; --text: #eee; --muted: #888; --accent: #ff7a45; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { font-size: 1.4rem; margin: 0 0 8px; }
+    .sub { color: var(--muted); margin-bottom: 20px; font-size: 14px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    input, select, button {
+      width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+      background: #181818; color: var(--text); font-size: 14px; margin-bottom: 12px;
+    }
+    button { background: var(--accent); border: none; color: #111; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; }
+    .err { color: #ff6b81; font-size: 14px; }
+    .ok { color: #4ade80; font-size: 13px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Статистика рекламных кампаний</h1>
+    <p class="sub">Клики по кнопкам trial / releases / channel</p>
+
+    <div class="card" id="loginCard">
+      <label>Admin key (X-Admin-Key)</label>
+      <input type="password" id="adminKey" placeholder="Ключ администратора" autocomplete="current-password">
+      <button type="button" id="saveKey">Сохранить и загрузить кампании</button>
+      <p class="err" id="loginErr" hidden></p>
+    </div>
+
+    <div class="card" id="statsCard" hidden>
+      <div class="grid">
+        <div>
+          <label>Кампания</label>
+          <select id="campaignSelect"></select>
+        </div>
+        <div>
+          <label>Период</label>
+          <select id="periodSelect">
+            <option value="1h">1 час</option>
+            <option value="6h">6 часов</option>
+            <option value="12h">12 часов</option>
+            <option value="24h" selected>24 часа</option>
+            <option value="2d">2 дня</option>
+            <option value="3d">3 дня</option>
+            <option value="7d">7 дней</option>
+            <option value="14d">14 дней</option>
+            <option value="30d">30 дней</option>
+          </select>
+        </div>
+      </div>
+      <button type="button" id="refreshBtn">Обновить</button>
+      <p class="ok" id="meta"></p>
+      <table>
+        <thead>
+          <tr><th>Метрика</th><th>Всего</th><th>Unique*</th></tr>
+        </thead>
+        <tbody id="statsBody"></tbody>
+      </table>
+      <p class="sub">* Unique — оценка по hash IP+UA, не Telegram ID</p>
+      <p class="err" id="statsErr" hidden></p>
+    </div>
+  </div>
+  <script>
+(function () {
+  var API = 'https://foxygame.net/yookassa/campaign/stats';
+  var keyInput = document.getElementById('adminKey');
+  var saveKeyBtn = document.getElementById('saveKey');
+  var loginErr = document.getElementById('loginErr');
+  var statsCard = document.getElementById('statsCard');
+  var campaignSelect = document.getElementById('campaignSelect');
+  var periodSelect = document.getElementById('periodSelect');
+  var refreshBtn = document.getElementById('refreshBtn');
+  var statsBody = document.getElementById('statsBody');
+  var statsErr = document.getElementById('statsErr');
+  var meta = document.getElementById('meta');
+
+  function getKey() {
+    return sessionStorage.getItem('fox_campaign_admin_key') || '';
+  }
+
+  function setKey(v) {
+    sessionStorage.setItem('fox_campaign_admin_key', v);
+  }
+
+  function apiUrl(params) {
+    var q = new URLSearchParams(params);
+    return API + '?' + q.toString();
+  }
+
+  function fetchStats(params) {
+    return fetch(apiUrl(params), {
+      headers: { 'X-Admin-Key': getKey() },
+      cache: 'no-store',
+    }).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, status: r.status, json: j }; });
+    });
+  }
+
+  function loadCampaigns() {
+    loginErr.hidden = true;
+    return fetchStats({ list: '1' }).then(function (res) {
+      if (!res.ok) {
+        loginErr.textContent = (res.json && res.json.error) || ('HTTP ' + res.status);
+        loginErr.hidden = false;
+        statsCard.hidden = true;
+        return;
+      }
+      statsCard.hidden = false;
+      campaignSelect.innerHTML = '';
+      (res.json.campaigns || []).forEach(function (c) {
+        var opt = document.createElement('option');
+        opt.value = c.slug;
+        opt.textContent = c.slug + (c.name ? ' — ' + c.name : '');
+        campaignSelect.appendChild(opt);
+      });
+      if (campaignSelect.options.length) refreshStats();
+    }).catch(function (e) {
+      loginErr.textContent = 'Ошибка сети: ' + e.message;
+      loginErr.hidden = false;
+    });
+  }
+
+  function refreshStats() {
+    statsErr.hidden = true;
+    var slug = campaignSelect.value;
+    var period = periodSelect.value;
+    if (!slug) return;
+    refreshBtn.disabled = true;
+    fetchStats({ c: slug, period: period }).then(function (res) {
+      refreshBtn.disabled = false;
+      if (!res.ok) {
+        statsErr.textContent = (res.json && res.json.error) || ('HTTP ' + res.status);
+        statsErr.hidden = false;
+        return;
+      }
+      var s = res.json.stats || {};
+      var clicks = s.clicks || {};
+      meta.textContent = 'Кампания ' + res.json.slug + ' · период ' + res.json.period + ' · с ' + res.json.since;
+      var rows = [
+        ['⚡ Пробный доступ (клик)', clicks.trial],
+        ['⬇️ GitHub Releases (клик)', clicks.releases],
+        ['📢 Перейти в канал (клик)', clicks.channel],
+      ];
+      statsBody.innerHTML = rows.map(function (r) {
+        var t = (r[1] && r[1].total) || 0;
+        var u = (r[1] && r[1].unique) || 0;
+        return '<tr><td>' + r[0] + '</td><td>' + t + '</td><td>' + u + '</td></tr>';
+      }).join('') +
+        '<tr><td>Зашли в бота (start)</td><td colspan="2">' + (s.bot_starts || 0) + '</td></tr>' +
+        '<tr><td>Выдан trial-код</td><td colspan="2">' + (s.trials || 0) + '</td></tr>';
+    }).catch(function (e) {
+      refreshBtn.disabled = false;
+      statsErr.textContent = e.message;
+      statsErr.hidden = false;
+    });
+  }
+
+  saveKeyBtn.addEventListener('click', function () {
+    setKey(keyInput.value.trim());
+    loadCampaigns();
+  });
+  refreshBtn.addEventListener('click', refreshStats);
+  periodSelect.addEventListener('change', refreshStats);
+  campaignSelect.addEventListener('change', refreshStats);
+
+  var saved = getKey();
+  if (saved) {
+    keyInput.value = saved;
+    loadCampaigns();
+  }
+})();
+  </script>
+</body>
+</html>
